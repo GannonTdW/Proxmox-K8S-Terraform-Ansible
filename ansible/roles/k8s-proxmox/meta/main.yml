@@ -1,0 +1,17 @@
+galaxy_info:
+  author: GannonTdW
+  description: Intall kubernetes cluster with kubeadm
+  license: MIT
+  min_ansible_version: 2.12
+  platforms:
+    - name: AlmaLinux
+      versions:
+        - 8
+    - name: RockyLinux
+      versions:
+        - 8
+  galaxy_tags:
+    - kubernetes
+    - k8s
+    - helm
+    - metallb

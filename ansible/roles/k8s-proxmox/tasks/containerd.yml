@@ -1,0 +1,72 @@
+---
+- name: Debian distrib familly
+  block:
+    - name: Install Docker apt key
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/debian/gpg
+        state: present
+      tags: containerd
+
+    - name: Add containerd repository Debian
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/debian bullseye stable"
+        state: present
+        update_cache: true
+      tags: containerd
+
+    - name: Install containerd
+      ansible.builtin.apt:
+        name: containerd.io
+        update_cache: true
+        state: present
+      register: installcontainerd
+  when: ansible_facts['os_family'] == "Debian"
+  tags: containerd
+
+- name: RedHat distrib familly
+  block:
+    - name: Get stats of /etc/machine-id.ansible
+      ansible.builtin.stat:
+        path: /etc/yum.repos.d/docker-ce.repo
+        get_checksum: false
+        get_mime: false
+        get_attributes: false
+      register: docker_repo
+
+    - name: Add containerd repository RedHat
+      ansible.builtin.command: yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+      when: not docker_repo.stat.exists
+      tags: containerd
+
+    - name: Install containerd
+      ansible.builtin.dnf:
+        name: containerd.io
+        state: present
+      register: installcontainerd
+  when: ansible_facts['os_family'] == "RedHat"
+  tags: containerd
+
+- name: Set default containerd config
+  ansible.builtin.shell: containerd config default | sudo tee /etc/containerd/config.toml
+  when: installcontainerd.changed
+  tags: containerd
+
+- name: Set containerd options
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: '^(\s+)SystemdCgroup = false'
+    replace: '            SystemdCgroup = true'
+  when: installcontainerd.changed
+  notify: Restart containerd
+  tags: containerd
+
+- name: Verify than containerd is started and enabled
+  ansible.builtin.systemd:
+    name: containerd
+    state: started
+    enabled: true
+  tags: containerd
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+  tags: containerd

@@ -1,0 +1,30 @@
+---
+# tasks file for k8s-proxmox
+- name: Check supported OS
+  ansible.builtin.fail:
+    msg: "The OS {{ ansible_distribution }} {{ ansible_distribution_major_version }} is not supported"
+  when: not ansible_facts['os_family'] == 'RedHat'
+
+- name: Common
+  include_tasks: common.yml
+  tags: common
+
+- name: Containerd
+  include_tasks: containerd.yml
+  tags: containerd
+
+- name: Kubernetes
+  include_tasks: kubernetes.yml
+  tags: kubernetes
+
+- name: Set-cluster
+  include_tasks: set-cluster.yml
+
+- name: Helm
+  include_tasks: helm.yml
+  tags: helm
+
+- name: Metallb
+  include_tasks: metallb.yml
+  when: inventory_hostname == groups["masters"][0]
+  tags: metallb

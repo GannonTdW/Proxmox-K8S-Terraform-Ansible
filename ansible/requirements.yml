@@ -1,0 +1,9 @@
+---
+# Install roles from Ansible Galaxy.
+#roles:
+
+# Install collections from Ansible Galaxy.
+collections:
+  - name: community.general
+  - name: ansible.posix
+  - name: kubernetes.core

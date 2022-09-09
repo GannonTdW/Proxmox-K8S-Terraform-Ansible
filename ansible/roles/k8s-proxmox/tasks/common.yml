@@ -1,0 +1,76 @@
+---
+- name: Install some common tools
+  ansible.builtin.package:
+    name: "{{ common_tools }}"
+    state: present
+  tags: common
+
+- name: Disable swap
+  ansible.builtin.command: swapoff -a
+  when: ansible_memory_mb.swap.total != 0
+  tags: common
+
+- name: Remove swapfile from /etc/fstab
+  ansible.posix.mount:
+    name: "swap"
+    fstype: swap
+    state: absent
+  tags: common
+
+- name: Disable swappiness with sysctl
+  ansible.posix.sysctl:
+    name: "vm.swappiness"
+    value: 0
+    state: present
+    sysctl_file: /etc/sysctl.d/k8s.conf'
+  tags: common
+
+- name: Config ipv4 network sysconfig
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: 1
+    state: present
+    sysctl_file: /etc/sysctl.d/k8s.conf'
+  loop:
+    - net.ipv4.ip_forward
+  tags: common
+
+- name: Config ipv6 network sysconfig
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: 1
+    state: present
+    sysctl_file: /etc/sysctl.d/k8s.conf'
+  loop:
+    - net.ipv6.conf.all.forwarding
+  when: not disable_ipv6
+  tags: common
+
+- name: Disable IPv6 on system
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: 1
+    state: present
+    reload: true
+    sysctl_file: /etc/sysctl.d/k8s.conf'
+  loop:
+    - net.ipv6.conf.all.disable_ipv6
+    - net.ipv6.conf.lo.disable_ipv6
+  when: disable_ipv6
+  tags: common
+
+- name: Load kernel modules overlay and br_netfilter
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - overlay
+    - br_netfilter
+  tags: common
+
+- name: Verify than qemu-guest-agent is started and enabled
+  ansible.builtin.systemd:
+    name: qemu-guest-agent
+    state: started
+    enabled: true
+  tags: common

@@ -1,0 +1,7 @@
+---
+# handlers file for k8s-proxmox
+- name: Restart containerd
+  ansible.builtin.systemd:
+    name: containerd
+    state: restarted
+    daemon_reload: true

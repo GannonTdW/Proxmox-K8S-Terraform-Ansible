@@ -1,0 +1,91 @@
+---
+- name: Install Helm with distribution packages manager
+  block:
+    - name: Install helm key
+      ansible.builtin.shell: 'if [ ! -f /usr/share/keyrings/helm.gpg ]; \
+        then curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | \
+        tee /usr/share/keyrings/helm.gpg > /dev/null | echo "ok" ; else echo "exist";fi'
+      register: add_helm_key
+      changed_when: add_helm_key.stdout.find("ok") == 0
+      tags: helm
+
+    - name: Add helm repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main"
+        state: present
+        update_cache: true
+      when: ansible_facts['os_family'] == "Debian"
+      tags: helm
+
+    - name: Install helm packages
+      ansible.builtin.apt:
+        name: "helm"
+        update_cache: true
+        state: present
+  when: ansible_facts['os_family'] == "Debian"
+  tags: helm
+
+- name: Install Helm from binary
+  block:
+    - name: Check Helm path exists.
+      ansible.builtin.stat:
+        path: "{{ helm_bin_path.split('/')[:-1] | join('/') }}"
+      register: helm_path_check
+
+    - name: Failt when helm bin folder not exist
+      ansible.builtin.fail:
+        msg: "{{ helm_bin_path.split('/')[:-1] | join('/') }} not exist"
+      when: not helm_path_check.stat.exists
+
+    - name: Check if Helm binary exists.
+      ansible.builtin.stat:
+        path: "{{ helm_bin_path }}"
+      register: helm_check
+
+    - name: Get last Helm version
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/helm/helm/releases/latest
+      register: helm_last_version
+      run_once: true
+      when: helm_version == "lastest"
+
+    - name: Set helm_last_version fact
+      ansible.builtin.set_fact:
+        helm_last_version: "{{ helm_last_version.json.assets[0].name.split('-')[1] }}"
+      when: helm_version == "lastest"
+
+    - name: Check Helm local version.
+      ansible.builtin.command: "{{ helm_bin_path }} version"
+      failed_when: false
+      changed_when: false
+      register: helm_local_version
+
+    - name: "Download helm specific version {{ helm_version }}"
+      ansible.builtin.unarchive:
+        src: "{{ helm_repo_path }}/helm-{{ helm_version }}-{{ helm_platform }}-{{ helm_arch }}.tar.gz"
+        dest: /tmp
+        remote_src: true
+        mode: 0755
+      register: helm_version_download
+      when: helm_version != "lastest" and helm_version not in helm_local_version.stdout
+
+    - name: Download helm lastest version
+      ansible.builtin.unarchive:
+        src: "{{ helm_repo_path }}/helm-{{ helm_last_version }}-{{ helm_platform }}-{{ helm_arch }}.tar.gz"
+        dest: /tmp
+        remote_src: true
+        mode: 0755
+      register: helm_lastest_download
+      when: helm_version == "lastest" and helm_last_version not in helm_local_version.stdout
+
+    - name: Copy helm binary into place.
+      ansible.builtin.copy:
+        src: "/tmp/{{ helm_platform }}-{{ helm_arch }}/helm"
+        dest: "{{ helm_bin_path }}"
+        mode: 0755
+        remote_src: true
+      become: true
+      when: helm_version_download is changed or helm_lastest_download is changed
+
+  when: ansible_facts['os_family'] == "RedHat"
+  tags: helm

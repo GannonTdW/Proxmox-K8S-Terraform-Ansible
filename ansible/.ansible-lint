@@ -1,0 +1,64 @@
+# .ansible-lint
+#
+# Reference documentation: 
+#   https://ansible-lint.readthedocs.io/en/latest/configuring.html#configuration-file
+#
+# Chemins à exclure de l'analyse statique
+#
+exclude_paths:
+  - .cache/  
+  - .github/
+  - .direnv/
+  - .git/
+  - keys/
+  - secrets/
+  - tests/
+  - requirements.yml
+  - molecule.yml
+parseable: true     # Utiliser un format parseable de rapport
+quiet: false        # Limiter le contenu du rapport à son strict minimum
+verbosity: 1        # Niveau de verbosité du rapport
+#
+# Oblige les variables de boucles à être nommées avec ce préfixe, comme ceci :
+#
+#   - name: Exemple conforme
+#     debug:
+#       msg: "Élément courant {{ __current_name }}"
+#     loop:
+#       - "premier"
+#       - "second"
+#     loop_control:
+#       loop_var: "__current_name"
+#
+loop_var_prefix: "__current_"
+#
+# Active le jeu de règles par défaut
+#
+use_default_rules: true
+#
+# Ignore toutes les règles listées dans cette 'skip_list'
+#
+skip_list:
+  - fqcn-builtins   # Pas besoin de surcharger le code avec des noms de modules complets quand il 
+                    # s'agit de 'ansible.builtin.*'
+
+  - meta-no-info    # La plupart des projets internes n'ont pas besoin de renseigner un fichier
+                    # 'meta/main.yml' pour leurs rôles. À retirer si vous comptez publier.
+#
+# Certaines règles ont un tag 'opt-in', elles ne sont pas activées à moins de les inclure
+# dans cette 'enable_list'
+#
+enable_list:
+  - no-log-password # Vérifie tant que possible que des passwords ne sont pas loggés
+  - no-same-owner   # Vérifie que les transfert de fichier mentionnent 'owner' et 'group'
+  - yaml            # Intègre un rapport YAML-Lint dans le rapport d'Ansible-Lint
+#
+# Règles à relever comme des Warning et non des Fautes
+#
+warn_list:
+  - git-latest      # Les usages du module 'git' devraient mentionner la gitref ciblée.
+  - experimental    # Relève les usages de modules Ansible marqués comme expérimentaux (par défaut)
+#
+# Désactive l'installation du requirements.yml
+#
+offline: true

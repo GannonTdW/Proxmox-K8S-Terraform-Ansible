@@ -1,0 +1,118 @@
+---
+- name: Check kubeproxy strictARP
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  ansible.builtin.shell: 'kubectl get configmap kube-proxy -n kube-system -o yaml | \
+    sed -e "s/strictARP: false/strictARP: true/" | \
+    kubectl diff -f - -n kube-system | grep -c diff || true'
+  register: metallb_strictarp
+  changed_when: 'metallb_strictarp.stdout.find("1") == 0'
+  ignore_errors: true
+  delegate_to: '{{ groups["masters"][0] }}'
+  tags: metallb
+
+- name: Actually apply strictARP is true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  ansible.builtin.shell: 'kubectl get configmap kube-proxy -n kube-system -o yaml | \
+    sed -e "s/strictARP: false/strictARP: true/" | kubectl apply -f - -n kube-system'
+  when: metallb_strictarp.changed
+  tags: metallb
+
+- name: Creata and label metallb-system namespace
+  block:
+    - name: Create a k8s namespace
+      kubernetes.core.k8s:
+        name: metallb-system
+        kind: Namespace
+        state: present
+        definition:
+          metadata:
+            labels:
+              pod-security.kubernetes.io/enforce: privileged
+              pod-security.kubernetes.io/audit: privileged
+              pod-security.kubernetes.io/warn: privileged
+      tags: metallb
+  rescue:
+    - name: Get metallb-system namespaces
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      ansible.builtin.command: 'kubectl get ns metallb-system -o=jsonpath="{.metadata.labels}"'
+      register: metallbsystem
+      ignore_errors: true
+      tags: metallb
+
+    - name: Create namespace metallb-system if not existe
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      ansible.builtin.command: 'kubectl create ns metallb-system'
+      when: '"metallb-system" in metallbsystem.stderr'
+      run_once: true
+      tags: metallb
+
+    - name: Label namespace metallb-system
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      ansible.builtin.command: "kubectl label ns metallb-system {{ item }}=privileged "
+      loop:
+        - pod-security.kubernetes.io/enforce
+        - pod-security.kubernetes.io/audit
+        - pod-security.kubernetes.io/warn
+      when: 'not "privileged" in metallbsystem.stdout'
+      run_once: true
+      tags: metallb
+
+- name: Add metallb repository
+  environment:
+    PATH: /usr/local/bin:{{ ansible_env.PATH }}
+  kubernetes.core.helm_repository:
+    name: metallb
+    repo_url: https://metallb.github.io/metallb
+  tags: metallb
+
+- name: Add metallb chart
+  environment:
+    PATH: /usr/local/bin:{{ ansible_env.PATH }}
+  kubernetes.core.helm:
+    name: metallb
+    state: present
+    chart_ref: metallb/metallb
+    release_namespace: metallb-system
+    create_namespace: true
+  tags: metallb
+
+- name: Template metallb IPAddressPool and L2Advertisement to /root/.kube
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/root/.kube/{{ item }}.yml"
+    mode: '600'
+  loop:
+    - metallb-IPAddressPool
+    - metallb-L2Advertisement
+  tags: metallb
+
+- name: Pause for 15 seconds to apply metallb chart
+  ansible.builtin.pause:
+    seconds: 15
+
+- name: Apply metallb IPAddressPool and L2Advertisement
+  block:
+    - name: Whith k8s modul
+      environment:
+        PATH: /usr/local/bin:{{ ansible_env.PATH }}
+      kubernetes.core.k8s:
+        state: present
+        src: "/root/.kube/{{ item }}.yml"
+      loop:
+        - metallb-IPAddressPool
+        - metallb-L2Advertisement
+      tags: metallb
+  rescue:
+    - name: Or command modul
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      ansible.builtin.command: "kubectl apply -f /root/.kube/{{ item }}.yml"
+      loop:
+        - metallb-IPAddressPool
+        - metallb-L2Advertisement
+      tags: metallb

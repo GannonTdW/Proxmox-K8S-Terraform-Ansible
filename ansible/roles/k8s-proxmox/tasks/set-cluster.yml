@@ -1,0 +1,190 @@
+---
+
+- name: Check cluster member status (init or not)
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  ansible.builtin.shell: kubectl get nodes -o wide | grep {{ inventory_hostname }} | tr -s ' ' | cut -d ' ' -f2 | wc -l || true
+  register: kubeadm_is_init
+  changed_when: false
+  delegate_to: '{{ groups["masters"][0] }}'
+  tags: set-cluster
+
+- name: Register Kubernetes certificate key for integreate new master
+  ansible.builtin.shell: kubeadm certs certificate-key || true
+  register: kubeadm_certificate_key
+  changed_when: false
+  when: inventory_hostname == groups["masters"][0]
+  tags: set-cluster
+
+- name: Set fact for certificate key for integrate new master
+  run_once: true
+  ansible.builtin.set_fact: kubeadm_certificate_key="{{ kubeadm_certificate_key.stdout }}"
+  when: inventory_hostname == groups["masters"][0]
+  tags: set-cluster
+
+- name: Check Kubernetes join token
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  ansible.builtin.shell: kubeadm token list | grep bootstrap | cut -d ' ' -f1 | head -n 1 || true
+  register: kubeadm_join_token
+  changed_when: false
+  when: inventory_hostname == groups["masters"][0]
+  tags: set-cluster
+
+- name: Generate Kubernetes join token if no kubeadm_join_token
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  ansible.builtin.command: kubeadm token generate
+  register: kubeadm_join_token_create
+  when: inventory_hostname == groups["masters"][0] and kubeadm_join_token.stdout == ''
+  tags: set-cluster
+
+- name: Set fact for existing Kubernetes join token
+  run_once: true
+  ansible.builtin.set_fact: kubeadm_join_token="{{ kubeadm_join_token.stdout }}"
+  when: inventory_hostname == groups["masters"][0] and not kubeadm_join_token_create.changed
+  tags: set-cluster
+
+- name: Set fact for created Kubernetes join token
+  run_once: true
+  ansible.builtin.set_fact: kubeadm_join_token="{{ kubeadm_join_token_create.stdout }}"
+  when: inventory_hostname == groups["masters"][0] and kubeadm_join_token_create.changed
+  tags: set-cluster
+
+- name: Init primary Kubernetes control plane
+  ansible.builtin.command: "kubeadm init \
+    --control-plane-endpoint {{ kubeadm_load_balancer_dns }}:{{ kubeadm_load_balancer_port }} \
+    --pod-network-cidr {{ kubeadm_pod_network_cidr }} --token {{ kubeadm_join_token }} \
+    --certificate-key {{ kubeadm_certificate_key }}"
+  when: inventory_hostname == groups["masters"][0] and kubeadm_is_init.stdout | int < 1
+  tags: set-cluster
+
+- name: Generate kubeadm-certs secret
+  ansible.builtin.command: "kubeadm init phase upload-certs --upload-certs \
+    --certificate-key {{ kubeadm_certificate_key }}"
+  when: inventory_hostname == groups["masters"][0] and kubeadm_is_init.stdout | int < 1
+  tags: set-cluster
+
+- name: Register Kubernetes discovery token ca cert hash
+  ansible.builtin.shell: openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | \
+    openssl rsa -pubin -outform der 2>/dev/null | \
+    openssl dgst -sha256 -hex | sed 's/^.* //' || true
+  register: kubeadm_discovery_token_ca_cert_hash
+  changed_when: false
+  when: inventory_hostname == groups["masters"][0]
+  tags: set-cluster
+
+- name: Set fact for Kubernetes discovery token ca cert hash
+  run_once: true
+  ansible.builtin.set_fact: kubeadm_discovery_token_ca_cert_hash="{{ kubeadm_discovery_token_ca_cert_hash.stdout }}"
+  when: inventory_hostname == groups["masters"][0]
+  tags: set-cluster
+
+- name: Check Kubernetes network configurations
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  ansible.builtin.shell: "kubectl get all -n kube-system 2>&1 | grep {{ kubeadm_cni_plugins.name }} | wc -l || true"
+  register: kubeadm_network
+  changed_when: false
+  when: inventory_hostname == groups["masters"][0]
+  tags: set-cluster
+
+- name: Download network configurations
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "{{ item.dest }}"
+    force: true
+    owner: "root"
+    group: "root"
+    mode: '0644'
+  loop: "{{ kubeadm_cni_plugins.sources }}"
+  when: inventory_hostname == groups["masters"][0] and kubeadm_network.stdout | int < 1
+  tags: set-cluster
+
+- name: Modify network configurations
+  ansible.builtin.lineinfile:
+    dest: "{{ kubeadm_cni_plugins.sources[0].dest }}"
+    insertafter: "            #   value: \"192.168.0.0/16\""
+    line: "            - name: CALICO_IPV4POOL_CIDR\n              value: \"{{ kubeadm_pod_network_cidr }}\""
+  when: inventory_hostname == groups["masters"][0] and kubeadm_network.stdout | int < 1
+  tags: set-cluster
+
+- name: Apply network configurations
+  ansible.builtin.command: "kubectl apply -f {{ item.dest }}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  loop: "{{ kubeadm_cni_plugins.sources }}"
+  when: inventory_hostname == groups["masters"][0] and kubeadm_network.stdout | int < 1
+  tags: set-cluster
+
+- name: Join the rest of Kubernetes control plane nodes
+  ansible.builtin.command: "kubeadm join --v=5 {{ kubeadm_load_balancer_dns }}:{{ kubeadm_load_balancer_port }} \
+    --control-plane --token {{ kubeadm_join_token }} --discovery-token-ca-cert-hash sha256:{{ kubeadm_discovery_token_ca_cert_hash }} \
+    --certificate-key {{ kubeadm_certificate_key }}"
+  when: kubeadm_is_init.stdout | int < 1 and inventory_hostname != groups["masters"][0] and "masters" in group_names
+  tags: set-cluster
+
+- name: Join the rest of Kubernetes worker nodes
+  ansible.builtin.command: "kubeadm join {{ kubeadm_load_balancer_dns }}:{{ kubeadm_load_balancer_port }} \
+    --token {{ kubeadm_join_token }} --discovery-token-ca-cert-hash sha256:{{ kubeadm_discovery_token_ca_cert_hash }}"
+  register: kubeadm_add_new_worker
+  when: kubeadm_is_init.stdout | int < 1 and "workers" in group_names
+  tags: set-cluster
+
+- name: Label worker nodes
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  ansible.builtin.command: "kubectl label nodes {{ item }} kubernetes.io/role=worker "
+  loop: "{{ groups['workers'] }}"
+  run_once: true
+  when: kubeadm_add_new_worker.changed
+  tags: set-cluster
+
+- name: Check kubernetes join statuses
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  ansible.builtin.shell: kubectl get nodes -o wide | grep {{ inventory_hostname }} | tr -s ' ' | cut -d ' ' -f2 | wc -l || true
+  register: kubeadm_is_init
+  changed_when: false
+  delegate_to: '{{ groups["masters"][0] }}'
+  tags: set-cluster
+
+- name: Ensure kube config directory exists
+  ansible.builtin.file:
+    path: "{{ item.path }}/.kube"
+    state: directory
+    owner: "{{ item.user }}"
+    group: "{{ item.user }}"
+    mode: '0700'
+  loop:
+    - { path: /root, user: "root" }
+    - { path: "/home/{{ kubeadm_user }}", user: "{{ kubeadm_user }}" }
+  tags: set-cluster
+
+- name: Copy admin.conf for Kubernetes control plane nodes
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ item.path }}/.kube/config"
+    owner: "{{ item.user }}"
+    group: "{{ item.user }}"
+    remote_src: true
+    mode: '0600'
+  loop:
+    - { path: /root, user: "root" }
+    - { path: "/home/{{ kubeadm_user }}", user: "{{ kubeadm_user }}" }
+  when: inventory_hostname in groups["masters"]
+  tags: set-cluster
+
+- name: Copy kubelet.conf for Kubernetes worker nodes
+  ansible.builtin.copy:
+    src: /etc/kubernetes/kubelet.conf
+    dest: "{{ item.path }}/.kube/config"
+    owner: "{{ item.user }}"
+    group: "{{ item.user }}"
+    remote_src: true
+    mode: '600'
+  loop:
+    - { path: /root, user: "root" }
+    - { path: "/home/{{ kubeadm_user }}", user: "{{ kubeadm_user }}" }
+  when: inventory_hostname in groups["workers"]
+  tags: set-cluster

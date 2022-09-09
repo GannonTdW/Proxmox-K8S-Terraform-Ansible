@@ -1,0 +1,19 @@
+[cluster]
+[cluster:children]
+masters
+workers
+
+[masters]
+%{ for index, master in masters ~}
+${master.name} ansible_host=${master.default_ipv4_address}
+%{ endfor ~}
+
+[workers]
+%{ for index, worker in workers ~}
+${worker.name} ansible_host=${worker.default_ipv4_address}
+%{ endfor ~}
+
+
+[all:vars]
+ansible_user = k8s
+

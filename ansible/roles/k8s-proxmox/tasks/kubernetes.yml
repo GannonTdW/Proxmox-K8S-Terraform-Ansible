@@ -1,0 +1,95 @@
+---
+- name: Debian distrib familly
+  block:
+    - name: See https://github.com/kubernetes/release/issues/1982
+      block:
+        - name: Install kubernetes apt key
+          ansible.builtin.get_url:
+            url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+            dest: /usr/share/keyrings/kubernetes-archive-keyring.gpg
+            mode: '0440'
+
+        - name: Add kubernetes signed repository
+          ansible.builtin.apt_repository:
+            repo: "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main"
+            filename: kubernetes-signed.list
+            state: present
+      rescue:
+        - name: Remove /usr/share/keyrings/kubernetes-archive-keyring.gpg
+          ansible.builtin.file:
+            path: /usr/share/keyrings/kubernetes-archive-keyring.gpg
+            state: absent
+
+        - name: Remove kubernetes signed repository
+          ansible.builtin.apt_repository:
+            repo: "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main"
+            filename: kubernetes-signed.list
+            state: absent
+
+        - name: Add kubernetes unsigned repository
+          ansible.builtin.apt_repository:
+            repo: "deb https://apt.kubernetes.io/ kubernetes-xenial main"
+            filename: kubernetes-unsigned.list
+            state: present
+
+        - name: Add kubernetes unsigned repository
+          ansible.builtin.copy:
+            src: kubernetes-unsigned.list
+            dest: /etc/apt/sources.list.d/kubernetes-unsigned.list
+            owner: root
+            group: root
+            mode: '0644'
+
+    - name: Install kubernetes packages
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        update_cache: true
+        state: present
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+  when: ansible_facts['os_family'] == "Debian"
+  tags: kubernetes
+
+- name: RedHat distrib familly
+  block:
+    - name: Add repository
+      ansible.builtin.yum_repository:
+        name: Kubernetes
+        description: Kubernetes
+        baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-$basearch
+        gpgcheck: true
+        enabled: true
+        gpgkey:
+          - https://packages.cloud.google.com/yum/doc/yum-key.gpg
+          - https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+        exclude:
+          - kubelet
+          - kubeadm
+          - kubectl
+      tags: kubernetes
+
+    - name: Disable SELinux
+      ansible.posix.selinux:
+        state: disabled
+      tags: kubernetes
+
+    - name: Install kubernetes packages
+      ansible.builtin.yum:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+        disable_excludes: Kubernetes
+      tags: kubernetes
+  when: ansible_facts['os_family'] == "RedHat"
+  tags: kubernetes
+
+- name: Verify than kubelet is started and enabled
+  ansible.builtin.systemd:
+    name: kubelet
+    state: started
+    enabled: true
+  tags: kubernetes

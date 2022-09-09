@@ -1,0 +1,181 @@
+# Source global definitions
+[[ -f /etc/bashrc ]] && . /etc/bashrc
+[[ -f $HOME/.config/shell/profile ]] && . $HOME/.config/shell/profile
+[[ -f $HOME/.config/shell/aliases_fonctions ]] && . ~/.config/shell/aliases_fonctions
+[[ -f $HOME/.config/shell/bash_colors ]] && . $HOME/.config/shell/bash_colors
+
+# If not running interactively, don't do anything
+case $- in
+    *i*) ;;
+      *) return;;
+esac
+
+# don't put duplicate lines or lines starting with space in the history.
+# See bash(1) for more options
+HISTCONTROL=ignoreboth
+
+# append to the history file, don't overwrite it
+shopt -s histappend
+
+# taille de l'historique  en RAM
+HISTSIZE=1000
+# taille de l'historique dans le fichier
+HISTFILESIZE=2000
+
+# check the window size after each command and, if necessary,
+# update the values of LINES and COLUMNS.
+shopt -s checkwinsize
+
+# If set, the pattern "**" used in a pathname expansion context will
+# match all files and zero or more directories and subdirectories.
+#shopt -s globstar
+
+# make less more friendly for non-text input files, see lesspipe(1)
+[ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
+
+# Color ? ##############################################################
+
+if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null
+then
+	# We have color support; assume it's compliant with Ecma-48
+	# (ISO/IEC-6429). (Lack of such support is extremely rare, and such
+	# a case would tend to support setf rather than setaf.)
+	color_prompt=yes
+else
+	color_prompt=
+fi
+
+# hostcolor #############################################################
+
+if [ $(hostname -s) = "debmentine" ]; then
+    HOST_COLOR=${Blue}
+elif [ $(hostname -s) = "pve" ]; then
+    HOST_COLOR=${White}${On_Black}
+elif [ $(hostname -s) = "yunohost" ]; then
+    HOST_COLOR=${White}${On_Blue}
+elif [ $(hostname -s) = "msiubuntu" ]; then
+    HOST_COLOR=${BBlack}
+elif [ $(hostname -s) = "archbertha" ]; then
+    HOST_COLOR=${Blue}${On_IBlack}
+else
+    HOST_COLOR=''
+fi
+
+
+function __makeTerminalTitle() {
+    local title=''
+
+    local CURRENT_DIR="${PWD/#$HOME/\~}"
+
+    if [ -n "${SESSION_TYPE}" ]; then
+        title+="`hostname`:${CURRENT_DIR} [`whoami`@`hostname -f`]"
+    else
+        title+="${CURRENT_DIR} [`whoami`]"
+    fi
+
+    title+="`whoami`@`hostname -s`:${CURRENT_DIR}"
+
+    echo -en '\033]2;'${title}'\007'
+}
+
+function __getMachineId() {
+    if [ -f /etc/machine-id ]; then
+        echo $((0x$(cat /etc/machine-id | head -c 15)))
+    else
+        echo $(( (${#HOSTNAME}+0x$(hostid))))
+    fi
+}
+
+function __getHOSTCOLOR() {
+    local H=$(__getMachineId | rev )
+    local F="${H:0:1}" # F = foreground
+    local B="${H:1:1}" # B = background
+    if [ $F -eq $B ];then
+        local B= "${H:2:1}"
+        if [ $F -eq $B ];then
+            echo "\e[1;30;47m"
+        fi
+    else
+        echo "\e[1;3${F};4${B}m"
+    fi
+}
+
+function __makePS1() {
+    local EXIT="$?"
+
+    if [ -z "${HOST_COLOR}" ]; then
+      HOST_COLOR=$(__getHOSTCOLOR)
+    fi
+
+    PS1=''
+
+    #PS1+="${debian_chroot:+($debian_chroot)}"
+
+    if [ ${USER} == root ]; then
+        PS1+="\[${BRed}\]" # root
+    elif [ ${USER} != ${LOGNAME} ]; then
+        PS1+="\[${Green}\]" # normal user
+    else
+        PS1+="\[${Yellow}\]" # normal user
+    fi
+    PS1+="\u\[${Color_Off}\]"
+
+    if [ "${SESSION_TYPE}" == "remote/ssh" ]; then
+        PS1+="\[${BWhite}\]@"
+        PS1+="\[${HOST_COLOR}\]\h\[${Color_Off}\]" # host displayed only if ssh connection
+    else
+        PS1+="\[${BBlack}\]@"
+        PS1+="\[${HOST_COLOR}\]\h\[${Color_Off}\]" # host displayed only if not ssh connection
+    fi
+
+    PS1+="\[${BBlack}\]:"
+    PS1+="\[${Cyan}\]\w" # working directory
+
+    if [ ${USER} == root ]; then
+        #PS1+="\[${BBlack}\]\\##\[${Color_Off}\] " # prompt
+        PS1+="\[${BBlack}\]#\[${Color_Off}\] " # prompt
+    else
+        #PS1+="\[${BBlack}\]\\#$\[${Color_Off}\] " # prompt
+        PS1+="\[${BBlack}\]\\$\[${Color_Off}\] " # prompt
+    fi
+
+    __makeTerminalTitle
+}
+
+function __detectSessionType() {
+    if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ]; then
+      SESSION_TYPE=remote/ssh
+    else
+      case $(ps -o comm= -p "$PPID") in
+        sshd|*/sshd)
+            SESSION_TYPE=remote/ssh;;
+        *)
+            SESSION_TYPE=local;;
+      esac
+    fi
+}
+if [ "$color_prompt" = yes ]; then
+    __detectSessionType
+    PROMPT_COMMAND=__makePS1
+    PS2="\[${BPurple}\]>\[${Color_Off}\] " # continuation prompt
+fi
+
+unset color_prompt force_color_prompt
+
+# enable color support of ls and also add handy aliases
+if [ -x /usr/bin/dircolors ]; then
+    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+    alias dir='dir --color=auto'
+    alias vdir='vdir --color=auto'
+
+    alias grep='grep --color=auto'
+    alias fgrep='fgrep --color=auto'
+    alias egrep='egrep --color=auto'
+fi
+
+# citations
+if [[ -x `which fortune 2> /dev/null` ]]; then
+    echo
+    fortune
+fi
+

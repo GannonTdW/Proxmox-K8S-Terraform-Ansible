@@ -1,0 +1,5 @@
+---
+# vars file for k8s-proxmox
+
+metallb_ip_address_pool:
+  - 10.20.0.20-10.20.0.99

@@ -1,0 +1,32 @@
+---
+# defaults file for k8s-proxmox
+common_tools:
+  - python3-kubernetes
+
+disable_ipv6: true
+
+kubeadm_load_balancer_dns: "{{ hostvars[groups['masters'][0]]['ansible_default_ipv4']['address'] }}"
+kubeadm_load_balancer_port: 6443
+
+kubeadm_pod_network: "10.111.0.0"
+kubeadm_pod_cidr: "16"
+kubeadm_pod_network_cidr: "{{ kubeadm_pod_network }}/{{ kubeadm_pod_cidr }}"
+
+kubeadm_cni_plugins:
+  name: calico
+  sources:
+    - url: https://docs.projectcalico.org/manifests/calico.yaml
+      dest: /tmp/calico.yaml
+  modifications:
+    - exist: "192.168.0.0"
+      replace_by: "{{ kubeadm_pod_network }}"
+
+kubeadm_user: "k8s"
+
+helm_version: 'lastest'
+helm_platform: linux
+helm_arch: amd64
+
+helm_repo_path: "https://get.helm.sh"
+
+helm_bin_path: /usr/local/bin/helm
