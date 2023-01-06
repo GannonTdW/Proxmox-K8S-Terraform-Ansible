@@ -19,7 +19,7 @@ variable  "target_node" {
 variable "template" {
     type        = string
     description = "Proxmox template clone name"
-    default = "AlmaLinux8" #  "debian-11"
+    default = "Almalinux-8" #  "debian-11"
 }
 variable  "vm_ssh_authorized_key" {
     type        = string
